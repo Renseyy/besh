@@ -1,0 +1,180 @@
+#!/usr/bash
+
+_error(){
+	echo "$1" "$2" >&2
+	return 1
+}
+
+_uuid(){
+	cat /proc/sys/kernel/random/uuid
+}
+_parseInt(){
+	local text="$1"
+	local _number="";
+	for (( i=0; i<${#text}; i++ )); do
+		local char="${text:$i:1}"
+		if [[ $char =~ /^[0-9]+$/ ]]; then
+			number+=$char
+		else
+			declare -A _result
+		fi
+	done
+}
+##
+# parseVariable jest używane do przeparsowania argumentów 
+# typy są wykrywane następująco:
+# = 123 [int]
+# TODO: = 123.12323 [+ float?]
+# = 123 123 [array]
+# = name: value
+# Do wymuszenia stringa używamy podówjnych cudzysłowów ('" "' albo "' '")
+##
+_parseVariable(){
+	local text="$1"
+	local expectedType="$2"
+	declare -g _value;
+	declare -g _name;
+	declare -g _type;
+	local spaceLock=false
+	local insideString=false
+	local separator="space"
+	local actualStringDevider=""
+	local stage=name #name-> value
+	for (( i=0; i<${#text}; i++ )); do
+		local char="${text:$i:1}"
+		if [[ $char == "\"" || $char == "'" ]]; then
+			if [[ $insideString && $stage == "value" ]]; then
+				_value+=$char
+			else
+				spaceLock=true;
+			fi
+		elif [[ $char == "=" ]]; then
+			stage=value
+			spaceLock=false
+		elif [[ $char == " " ]]; then
+ 			if [[ $stage == "value" ]]; then
+				
+				_value+=$char
+			else
+				spaceLock=true;
+			fi
+		else
+			if [[ $stage == "name" ]]; then
+				if [[ $spaceLock == true ]]; then
+					return "$(_error "Błąd w nazwie zmiennej" "nazwa nie może zawierać spacji")" 
+				fi
+				_name+=$char
+			elif [[ $stage == value ]]; then
+				_value+=$char
+			fi
+		fi
+	done
+}
+
+##
+#
+##
+
+##
+# Pozwala nam pracować na objectach
+##
+
+_valueProxyWorker(){
+	local ref="$1"
+	echo "$ref $2"
+}
+
+new(){
+	echo "_valueProxyWorker $(_uuid)"
+}
+
+iterate(){
+	true;
+}
+##
+# Funkcja use używana jest do importowania modułów.
+##
+use(){
+	local what
+	local from
+	local as
+	echo "'$*'"
+}
+
+# TYPY
+## DOSTĘPNE TYPY:
+## - int (liczby całkowite)
+## - string (teksty)
+## - array (tablica)
+## - assoc (tablica asocjacyjna)
+##
+## Używając var do deklaracji możemy automatycznie wykryć typ zmiennej
+## Możemy także dodać słowo const do oznaczenia typu jako tylko do odczytu
+##
+## PRZYKŁAD:
+## var i = 123
+## int i = 123
+## const i = 123
+## const var i = 123 # var jest niepotrzebne w tym momencie
+## const int i = 123
+##
+## WSZYSTKIE TWORZONE W TEN SPOSÓB ZMIENNE SĄ GLOBALNE
+##
+## Używając tej notacji możemy dawać spacje po obu stronach znaku równości
+
+
+##
+# _varProxy() - słóży do tworzenia typów
+##
+_varProxy(){
+	# Allowed mainTypes: [const, var, int, string, array, assoc]
+	# Allowed secondTypes: [var, int, string, array, assoc] but only if mainType is const
+	local _mainType="$1"
+	local _secondType="$2"
+	local _rest=""
+	local flags="-g"
+	if [[ $_mainType == "const" ]]; then
+		flags+=" -r"
+		if [[ $_secondType == "var" || $_secondType == "int" || $_secondType == "string" || $_secondType == "array" || $_secondType == "assoc" ]]; then
+			_type="$_secondType"
+			_rest="${*:3}"
+		else
+			_type="var"
+			_rest="${*:2}"
+		fi
+	else
+		_rest="${*:2}"
+		_type="$_mainType"
+	fi
+	_parseVariable "$_rest" "$_type"
+	declare -g "$_name"="$_value"
+	unset _name
+	unset _value
+}
+## const - readonly
+const(){
+	_varProxy const "$@"
+}
+## var - tworzy ogólną wartość 
+var(){
+	_varProxy var "$@"
+}
+
+## array - tworzy nową tablicę
+array(){
+	_varProxy array "$@"
+}
+
+## assoc - tworzy nową tablicę asocjacyjną
+assoc(){
+	_varProxy assoc "$@"
+}
+
+## int - tworzy nową tablicę
+int(){
+	_varProxy int "$@"
+}
+
+string(){
+	_varProxy string "$@"
+}
